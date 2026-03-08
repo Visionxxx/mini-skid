@@ -95,7 +95,7 @@ fn calc_positions(cars: &[Car], track: &Track) -> Vec<usize> {
 async fn main() {
     let tracks = vec![make_oval(), make_figure8(), make_fjord()];
     let mut selected: usize = 0;
-    let mut num_players: usize = 1;
+    let mut num_players: usize = 2;
     let mut state = GameState::Menu;
     let mut cars: Vec<Car> = Vec::new();
     let mut skids = SkidBuffer::new();

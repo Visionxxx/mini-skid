@@ -70,6 +70,35 @@
     </script>
     <script src="mq_js_bundle.js"></script>
     <script>
+    // Patch manglende WebGL2-funksjoner som miniquad 0.4.8 trenger
+    // men som den eldre mq_js_bundle.js ikke har
+    importObject.env.glCheckFramebufferStatus = function(target) {
+        return gl.checkFramebufferStatus(target);
+    };
+    importObject.env.glFramebufferRenderbuffer = function(target, attachment, renderbuffertarget, renderbuffer) {
+        gl.framebufferRenderbuffer(target, attachment, renderbuffertarget, GL.renderbuffers[renderbuffer]);
+    };
+    importObject.env.glRenderbufferStorageMultisample = function(target, samples, internalformat, width, height) {
+        gl.renderbufferStorageMultisample(target, samples, internalformat, width, height);
+    };
+    importObject.env.glBlitFramebuffer = function(sx0, sy0, sx1, sy1, dx0, dy0, dx1, dy1, mask, filter) {
+        gl.blitFramebuffer(sx0, sy0, sx1, sy1, dx0, dy0, dx1, dy1, mask, filter);
+    };
+    importObject.env.glReadBuffer = function(src) {
+        gl.readBuffer(src);
+    };
+    importObject.env.glDeleteRenderbuffers = function(n, renderbuffers) {
+        for (var i = 0; i < n; i++) {
+            var id = getArray(renderbuffers + i * 4, Uint32Array, 1)[0];
+            var rb = GL.renderbuffers[id];
+            if (!rb) continue;
+            gl.deleteRenderbuffer(rb);
+            rb.name = 0;
+            GL.renderbuffers[id] = null;
+        }
+    };
+    </script>
+    <script>
     load("mini_skid.wasm");
     // Skjul loading-overlegget naar WASM er initialisert
     (function waitForWasm() {

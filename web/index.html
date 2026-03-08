@@ -50,7 +50,37 @@
 
     <canvas id="glcanvas" tabindex="1"></canvas>
 
+    <script>
+    // Fang opp ALLE feil — ogsaa fra load() sin .catch(console.error)
+    var _origErr = console.error;
+    console.error = function() {
+        var msg = Array.prototype.slice.call(arguments).map(function(a) {
+            return a instanceof Error ? a.message + '\n' + a.stack : String(a);
+        }).join(' ');
+        var el = document.getElementById('loading');
+        if (el) el.innerHTML = '<h1 style="color:#e33">Error</h1><pre style="color:#ccc;max-width:90%;overflow:auto;text-align:left;font-size:0.8rem;padding:1rem">' + msg + '</pre>';
+        _origErr.apply(console, arguments);
+    };
+    window.addEventListener('error', function(e) {
+        console.error(e.message || e);
+    });
+    window.addEventListener('unhandledrejection', function(e) {
+        console.error(e.reason || e);
+    });
+    </script>
     <script src="mq_js_bundle.js"></script>
-    <script>load("mini_skid.wasm");</script>
+    <script>
+    load("mini_skid.wasm");
+    // Skjul loading-overlegget naar WASM er initialisert
+    (function waitForWasm() {
+        if (typeof wasm_exports !== 'undefined' && wasm_exports !== null) {
+            var el = document.getElementById('loading');
+            if (el) { el.style.opacity = '0'; setTimeout(function() { el.style.display = 'none'; }, 500); }
+            canvas.focus();
+        } else {
+            setTimeout(waitForWasm, 100);
+        }
+    })();
+    </script>
 </body>
 </html>

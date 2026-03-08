@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mini Skid</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body {
+            width: 100%; height: 100%;
+            overflow: hidden;
+            background: #0a0a0a;
+        }
+        canvas {
+            display: block;
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+        }
+        #loading {
+            position: fixed; inset: 0;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            background: #0a0a0a; color: #ccc;
+            font-family: 'Courier New', monospace;
+            z-index: 10;
+        }
+        #loading h1 {
+            font-size: 2rem; color: #e33;
+            margin-bottom: 0.5rem;
+            letter-spacing: 0.1em;
+        }
+        #loading .sub { font-size: 0.9rem; color: #666; margin-bottom: 2rem; }
+        #loading .spinner {
+            width: 36px; height: 36px;
+            border: 3px solid #222; border-top: 3px solid #e33;
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div id="loading">
+        <h1>MINI SKID</h1>
+        <div class="sub">Super Skidmarks!</div>
+        <div class="spinner"></div>
+    </div>
+
+    <canvas id="glcanvas" tabindex="1"></canvas>
+
+    <script src="mq_js_bundle.js"></script>
+    <script>
+        load("mini_skid.wasm");
+        // Fjern loading naar canvas faar innhold
+        var check = setInterval(function() {
+            var c = document.getElementById("glcanvas");
+            if (c && c.width > 0 && c.height > 0) {
+                document.getElementById("loading").style.display = "none";
+                c.focus();
+                clearInterval(check);
+            }
+        }, 200);
+    </script>
+</body>
+</html>

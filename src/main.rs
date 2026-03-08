@@ -18,6 +18,10 @@ fn window_conf() -> Conf {
         window_title: "Mini Skid".to_string(),
         window_width: SCREEN_W as i32,
         window_height: SCREEN_H as i32,
+        platform: miniquad::conf::Platform {
+            webgl_version: miniquad::conf::WebGLVersion::WebGL2,
+            ..Default::default()
+        },
         ..Default::default()
     }
 }

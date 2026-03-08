@@ -11,6 +11,49 @@ pub struct CarInput {
     pub right: bool,
 }
 
+// Touch-knapp-layout (skjermkoordinater)
+const TOUCH_BTN: f32 = 90.0;
+const TOUCH_GAP: f32 = 12.0;
+const TOUCH_MARGIN: f32 = 20.0;
+
+pub fn touch_button_rects() -> [(f32, f32, f32, f32); 4] {
+    let sw = screen_width();
+    let sh = screen_height();
+    let y = sh - TOUCH_MARGIN - TOUCH_BTN;
+    [
+        (TOUCH_MARGIN, y, TOUCH_BTN, TOUCH_BTN),                          // LEFT
+        (TOUCH_MARGIN + TOUCH_BTN + TOUCH_GAP, y, TOUCH_BTN, TOUCH_BTN),  // RIGHT
+        (sw - TOUCH_MARGIN - 2.0 * TOUCH_BTN - TOUCH_GAP, y, TOUCH_BTN, TOUCH_BTN), // BRAKE
+        (sw - TOUCH_MARGIN - TOUCH_BTN, y, TOUCH_BTN, TOUCH_BTN),         // GAS
+    ]
+}
+
+pub fn get_touch_input() -> CarInput {
+    use macroquad::input::{touches, TouchPhase};
+    let btns = touch_button_rects();
+    let mut input = CarInput { gas: false, brake: false, left: false, right: false };
+    for touch in touches() {
+        match touch.phase {
+            TouchPhase::Started | TouchPhase::Stationary | TouchPhase::Moved => {
+                let p = touch.position;
+                for (i, &(bx, by, bw, bh)) in btns.iter().enumerate() {
+                    if p.x >= bx && p.x <= bx + bw && p.y >= by && p.y <= by + bh {
+                        match i {
+                            0 => input.left = true,
+                            1 => input.right = true,
+                            2 => input.brake = true,
+                            3 => input.gas = true,
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    input
+}
+
 #[derive(Clone)]
 pub struct Car {
     pub pos: Vec2,
@@ -79,10 +122,19 @@ impl Car {
 
     pub fn get_player_input(&self) -> CarInput {
         if let Some((up, down, left, right)) = self.keys {
-            CarInput {
+            let mut input = CarInput {
                 gas: is_key_down(up), brake: is_key_down(down),
                 left: is_key_down(left), right: is_key_down(right),
+            };
+            // Spiller 1 faar ogsaa touch-input (iPad/mobil)
+            if self.number == 1 {
+                let ti = get_touch_input();
+                input.gas |= ti.gas;
+                input.brake |= ti.brake;
+                input.left |= ti.left;
+                input.right |= ti.right;
             }
+            input
         } else {
             CarInput { gas: false, brake: false, left: false, right: false }
         }

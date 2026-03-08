@@ -1,5 +1,5 @@
 use macroquad::prelude::*;
-use crate::car::Car;
+use crate::car::{Car, touch_button_rects, get_touch_input};
 use crate::consts::*;
 use crate::particle::SkidBuffer;
 use crate::track::Track;
@@ -31,15 +31,17 @@ pub fn draw_hud(cars: &[Car], positions: &[usize], race_time: f32, track_name: &
     draw_text(&format!("{:.0} km/t", cars[0].vel.length()), 22.0, 46.0, 13.0, LIGHTGRAY);
     if cars[0].is_drifting { draw_text("DRIFT!", 140.0, 46.0, 13.0, YELLOW); }
 
-    // Spiller 2
-    let p2_pos = positions.iter().position(|&i| i == 1).unwrap_or(1) + 1;
-    let rx = screen_width() - 220.0;
-    draw_rectangle(rx, 5.0, 6.0, 40.0, cars[1].color);
-    draw_text(&cars[1].name, rx + 12.0, 18.0, 18.0, cars[1].color);
-    let s = match p2_pos { 1 => "st", 2 => "nd", 3 => "rd", _ => "th" };
-    draw_text(&format!("{}{} | Runde {}/{}", p2_pos, s, cars[1].laps.max(0), TOTAL_LAPS), rx + 12.0, 33.0, 15.0, WHITE);
-    draw_text(&format!("{:.0} km/t", cars[1].vel.length()), rx + 12.0, 46.0, 13.0, LIGHTGRAY);
-    if cars[1].is_drifting { draw_text("DRIFT!", rx + 140.0, 46.0, 13.0, YELLOW); }
+    // Spiller 2 (bare hvis human)
+    if !cars[1].is_ai() {
+        let p2_pos = positions.iter().position(|&i| i == 1).unwrap_or(1) + 1;
+        let rx = screen_width() - 220.0;
+        draw_rectangle(rx, 5.0, 6.0, 40.0, cars[1].color);
+        draw_text(&cars[1].name, rx + 12.0, 18.0, 18.0, cars[1].color);
+        let s = match p2_pos { 1 => "st", 2 => "nd", 3 => "rd", _ => "th" };
+        draw_text(&format!("{}{} | Runde {}/{}", p2_pos, s, cars[1].laps.max(0), TOTAL_LAPS), rx + 12.0, 33.0, 15.0, WHITE);
+        draw_text(&format!("{:.0} km/t", cars[1].vel.length()), rx + 12.0, 46.0, 13.0, LIGHTGRAY);
+        if cars[1].is_drifting { draw_text("DRIFT!", rx + 140.0, 46.0, 13.0, YELLOW); }
+    }
 
     // Posisjonsliste
     draw_rectangle(3.0, 55.0, 140.0, 20.0 + cars.len() as f32 * 16.0, Color::new(0.1, 0.1, 0.15, 1.0));
@@ -105,7 +107,45 @@ pub fn draw_finish_screen(cars: &[Car], positions: &[usize], race_time: f32) {
     draw_text("ENTER = Meny  |  R = Omkjoring", screen_width() / 2.0 - 130.0, 510.0, 18.0, Color::new(1.0, 1.0, 1.0, 0.6));
 }
 
-pub fn draw_menu(tracks: &[Track], selected: usize) {
+pub fn draw_touch_controls() {
+    // Sjekk om det er aktive touch-events — vis kun da
+    use macroquad::input::{touches, TouchPhase};
+    let active_touches: Vec<_> = touches().into_iter()
+        .filter(|t| matches!(t.phase, TouchPhase::Started | TouchPhase::Stationary | TouchPhase::Moved))
+        .collect();
+    let has_touch = !active_touches.is_empty();
+
+    let btns = touch_button_rects();
+    let labels = ["<", ">", "BRK", "GAS"];
+    let colors = [
+        Color::new(1.0, 1.0, 1.0, 0.12),
+        Color::new(1.0, 1.0, 1.0, 0.12),
+        Color::new(1.0, 0.3, 0.2, 0.12),
+        Color::new(0.2, 1.0, 0.3, 0.12),
+    ];
+    let active_colors = [
+        Color::new(1.0, 1.0, 1.0, 0.35),
+        Color::new(1.0, 1.0, 1.0, 0.35),
+        Color::new(1.0, 0.3, 0.2, 0.35),
+        Color::new(0.2, 1.0, 0.3, 0.35),
+    ];
+
+    let ti = get_touch_input();
+    let pressed = [ti.left, ti.right, ti.brake, ti.gas];
+
+    for (i, &(bx, by, bw, bh)) in btns.iter().enumerate() {
+        let base_alpha = if has_touch { 1.0 } else { 0.5 };
+        let col = if pressed[i] { active_colors[i] } else { colors[i] };
+        let col = Color::new(col.r, col.g, col.b, col.a * base_alpha);
+        draw_rectangle(bx, by, bw, bh, col);
+        draw_rectangle_lines(bx, by, bw, bh, 2.0, Color::new(1.0, 1.0, 1.0, 0.15 * base_alpha));
+        let lw = labels[i].len() as f32 * 8.0;
+        draw_text(labels[i], bx + bw / 2.0 - lw / 2.0, by + bh / 2.0 + 8.0, 28.0,
+            Color::new(1.0, 1.0, 1.0, 0.4 * base_alpha));
+    }
+}
+
+pub fn draw_menu(tracks: &[Track], selected: usize, num_players: usize) {
     clear_background(Color::new(0.03, 0.03, 0.1, 1.0));
     let t = get_time() as f32;
     for i in 0..20 {
@@ -155,7 +195,16 @@ pub fn draw_menu(tracks: &[Track], selected: usize) {
     }
 
     let y = 260.0 + tracks.len() as f32 * 90.0 + 30.0;
-    draw_text("6 biler: 2 spillere + 4 AI", screen_width() / 2.0 - 110.0, y, 18.0, Color::new(0.6, 0.8, 1.0, 0.7));
-    draw_text("Opp/Ned = Velg  |  Enter/1-3 = Start  |  ESC = Avslutt", screen_width() / 2.0 - 230.0, y + 30.0, 18.0, Color::new(1.0, 1.0, 1.0, 0.4));
-    draw_text("Spiller 1: WASD  |  Spiller 2: Piltaster", screen_width() / 2.0 - 170.0, y + 55.0, 18.0, Color::new(1.0, 1.0, 1.0, 0.35));
+    let player_text = if num_players == 1 {
+        format!("SPILLERE: << 1 >>  (6 biler: 1 spiller + 5 AI)")
+    } else {
+        format!("SPILLERE: << 2 >>  (6 biler: 2 spillere + 4 AI)")
+    };
+    draw_text(&player_text, screen_width() / 2.0 - 200.0, y, 18.0, Color::new(0.6, 0.8, 1.0, 0.9));
+    draw_text("Tab / Trykk = Bytt spillere  |  Enter = Start  |  ESC = Avslutt", screen_width() / 2.0 - 270.0, y + 30.0, 18.0, Color::new(1.0, 1.0, 1.0, 0.4));
+    if num_players == 1 {
+        draw_text("Spiller 1: WASD / Touch", screen_width() / 2.0 - 100.0, y + 55.0, 18.0, Color::new(1.0, 1.0, 1.0, 0.35));
+    } else {
+        draw_text("Spiller 1: WASD  |  Spiller 2: Piltaster", screen_width() / 2.0 - 170.0, y + 55.0, 18.0, Color::new(1.0, 1.0, 1.0, 0.35));
+    }
 }

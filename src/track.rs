@@ -16,6 +16,11 @@ pub struct Track {
 impl Track {
     /// Returnerer (segment-indeks, avstand, fraksjon langs segmentet)
     pub fn nearest_info(&self, p: Vec2) -> (usize, f32, f32) {
+        self.nearest_info_hint(p, None)
+    }
+
+    /// nearest_info med valgfritt hint om forrige segment (unngaar hopping ved kryss)
+    pub fn nearest_info_hint(&self, p: Vec2, hint: Option<usize>) -> (usize, f32, f32) {
         let n = self.center.len();
         let mut best_dist = f32::MAX;
         let mut best_idx = 0;
@@ -34,6 +39,45 @@ impl Track {
                 best_t = t;
             }
         }
+
+        // Hvis hint er gitt, sjekk om det finnes et segment naer hintet
+        // som ogsaa er nært nok — foretrekk det for aa unngaa hopping ved kryss
+        if let Some(prev_idx) = hint {
+            // Bare relevant hvis best_idx er langt fra prev_idx
+            let seg_dist = {
+                let d = (best_idx as i32 - prev_idx as i32).abs();
+                d.min(n as i32 - d) as usize
+            };
+            if seg_dist > n / 4 {
+                // Søk i en lokal radius rundt prev_idx
+                let search = n / 6;
+                let mut local_dist = f32::MAX;
+                let mut local_idx = best_idx;
+                let mut local_t = best_t;
+                for di in 0..=search {
+                    for &sign in &[0_i32, 1, -1] {
+                        let i = (prev_idx as i32 + sign * di as i32).rem_euclid(n as i32) as usize;
+                        let a = self.center[i];
+                        let b = self.center[(i + 1) % n];
+                        let ab = b - a;
+                        let ap = p - a;
+                        let t = (ap.dot(ab) / ab.dot(ab)).clamp(0.0, 1.0);
+                        let closest = a + ab * t;
+                        let dist = p.distance(closest);
+                        if dist < local_dist {
+                            local_dist = dist;
+                            local_idx = i;
+                            local_t = t;
+                        }
+                    }
+                }
+                // Bruk lokalt resultat hvis det er paa banen (eller naert nok)
+                if local_dist < self.width {
+                    return (local_idx, local_dist, local_t);
+                }
+            }
+        }
+
         (best_idx, best_dist, best_t)
     }
 
@@ -85,13 +129,6 @@ impl Track {
         h1 + (h2 - h1) * t
     }
 
-    pub fn slope_at(&self, idx: usize) -> f32 {
-        let n = self.center.len();
-        let j = (idx + 1) % n;
-        let dist = self.center[idx].distance(self.center[j]);
-        if dist > 0.01 { (self.height[j] - self.height[idx]) / dist } else { 0.0 }
-    }
-
     pub fn draw(&self) {
         let bounds = self.bounds();
         let margin = 400.0;
@@ -104,8 +141,8 @@ impl Track {
             Color::new(0.15, 0.38, 0.1, 1.0),
         );
 
-        // Gress-variasjon
-        let step = 60.0;
+        // Terreng-variasjon: gress, jord, sand-flekker i et rutenett
+        let step = 40.0;
         let x_start = ((bounds.0 - margin) / step).floor() as i32;
         let x_end = ((bounds.2 + margin) / step).ceil() as i32;
         let y_start = ((bounds.1 - margin) / step).floor() as i32;
@@ -113,10 +150,34 @@ impl Track {
         for ix in x_start..x_end {
             for iy in y_start..y_end {
                 let hash = ((ix * 7 + iy * 13 + 37) as u32).wrapping_mul(2654435761);
-                let x = ix as f32 * step + (hash % 40) as f32;
-                let y = iy as f32 * step + ((hash >> 8) % 40) as f32;
-                let shade = 0.08 + ((hash >> 16) % 5) as f32 * 0.01;
-                draw_circle(x, y, 2.0, Color::new(0.1, 0.28 + shade, shade, 1.0));
+                let x = ix as f32 * step + (hash % 20) as f32;
+                let y = iy as f32 * step + ((hash >> 8) % 20) as f32;
+                let variant = (hash >> 4) % 12;
+                match variant {
+                    0..=6 => {
+                        // Vanlig gress-variasjon
+                        let shade = 0.06 + ((hash >> 16) % 6) as f32 * 0.01;
+                        draw_circle(x, y, 2.0 + (hash % 3) as f32, Color::new(0.1, 0.3 + shade, shade, 1.0));
+                    }
+                    7..=8 => {
+                        // Morkere gress (skygge/fuktig)
+                        draw_circle(x, y, 3.0, Color::new(0.08, 0.22, 0.05, 0.7));
+                    }
+                    9 => {
+                        // Jord-flekk
+                        let sz = 4.0 + ((hash >> 20) % 5) as f32;
+                        draw_circle(x, y, sz, Color::new(0.28, 0.2, 0.1, 0.3));
+                    }
+                    10 => {
+                        // Sand/grus-flekk
+                        let sz = 3.0 + ((hash >> 20) % 4) as f32;
+                        draw_circle(x, y, sz, Color::new(0.45, 0.4, 0.25, 0.2));
+                    }
+                    _ => {
+                        // Stein
+                        draw_circle(x, y, 2.0, Color::new(0.35, 0.35, 0.32, 0.3));
+                    }
+                }
             }
         }
 
@@ -130,6 +191,28 @@ impl Track {
 
         let n = self.center.len();
         let half = self.width / 2.0;
+
+        // Grus/jord-rand rundt banen (mellom asfalt og gress)
+        let gravel_w = half + 20.0;
+        let gravel_step = 2;
+        for i in (0..n).step_by(gravel_step) {
+            let j = (i + gravel_step) % n;
+            let c1 = self.center[i];
+            let c2 = self.center[j];
+            let n1 = self.normal_at(i);
+            let n2 = self.normal_at(j);
+            let h = self.height[i];
+            if h > BRIDGE_HEIGHT { continue; }
+            let dirt = Color::new(0.3, 0.24, 0.12, 0.6);
+            for sign in [-1.0_f32, 1.0] {
+                let p1 = c1 + n1 * half * sign;
+                let p2 = c2 + n2 * half * sign;
+                let p3 = c2 + n2 * gravel_w * sign;
+                let p4 = c1 + n1 * gravel_w * sign;
+                draw_triangle(p1, p2, p3, dirt);
+                draw_triangle(p1, p3, p4, dirt);
+            }
+        }
 
         // Bro-skygge paa bakken (tegnes foer asfalt)
         for i in 0..n {
@@ -151,22 +234,63 @@ impl Track {
             }
         }
 
-        // Asfalt (bakkehøyde-basert skyggelegging)
+        // Asfalt med retningslys-shading (lys fra nordvest = -1,-1)
+        // Beregn slope mellom naboer og bruk det til aa shade overflaten
+        let light_dir = vec2(-0.7, -0.7); // Lysretning (normalisert-ish)
         for i in 0..n {
             let j = (i + 1) % n;
             let c1 = self.center[i];
             let c2 = self.center[j];
             let n1 = self.normal_at(i);
             let n2 = self.normal_at(j);
-            let h = (self.height[i] + self.height[j]) / 2.0;
-            let shade = 0.28 + (i as f32 * 0.008).sin() * 0.03 + h * 0.04;
+
+            // Hoyde-gradient langs banen (slope)
+            let look = 4.min(n / 2);
+            let h_behind = self.height[(i + n - look) % n];
+            let h_ahead = self.height[(i + look) % n];
+            let slope = (h_ahead - h_behind) / (look as f32 * 2.0);
+
+            // Konverter slope til en "overflate-normal" i verdenskoordinater
+            // Tangenten til banen peker langs segmentet
+            let tang = self.tangent_at(i);
+            // slope > 0 betyr at overflaten heller "oppover" langs tangenten
+            // Vi simulerer en 3D overflatenormal og dot-produkter den med lyset
+            let surface_tilt = tang * slope * 8.0; // Forsterket for synlighet
+            let light_dot = -light_dir.dot(surface_tilt).clamp(-1.0, 1.0);
+
+            // Base-shade + retningslys-bidrag
+            let base = 0.28 + (i as f32 * 0.008).sin() * 0.02;
+            let shade = (base + light_dot * 0.15).clamp(0.15, 0.45);
             let asphalt = Color::new(shade, shade, shade + 0.02, 1.0);
+
             let p1 = c1 + n1 * half;
             let p2 = c1 - n1 * half;
             let p3 = c2 - n2 * half;
             let p4 = c2 + n2 * half;
             draw_triangle(p1, p2, p3, asphalt);
             draw_triangle(p1, p3, p4, asphalt);
+        }
+
+        // Skygge-kanter paa bratte nedoverbakker (gir dybdefølelse)
+        for i in 0..n {
+            let j = (i + 1) % n;
+            let slope = self.height[j] - self.height[i];
+            // Tegn mork kant der det gaar bratt ned
+            if slope < -0.08 {
+                let c1 = self.center[i];
+                let c2 = self.center[j];
+                let n1 = self.normal_at(i);
+                let n2 = self.normal_at(j);
+                let alpha = (slope.abs() * 3.0).clamp(0.0, 0.4);
+                let edge_w = half + 6.0;
+                let offset = vec2(2.0, 3.0); // Skygge faller nedover-hoyre
+                let p1 = c1 + n1 * edge_w + offset;
+                let p2 = c1 - n1 * edge_w + offset;
+                let p3 = c2 - n2 * edge_w + offset;
+                let p4 = c2 + n2 * edge_w + offset;
+                draw_triangle(p1, p2, p3, Color::new(0.0, 0.0, 0.0, alpha));
+                draw_triangle(p1, p3, p4, Color::new(0.0, 0.0, 0.0, alpha));
+            }
         }
 
         // Curbs
@@ -187,21 +311,44 @@ impl Track {
             }
         }
 
-        // Bakke-markorer (sjevroner paa oppoverbakker)
-        let marker_step = 12;
+        // Bakke-markorer: tettere sjevroner + gradient-striper paa bakker
+        let marker_step = 6;
         for i in (0..n).step_by(marker_step) {
-            let slope = self.slope_at(i);
             let h = self.height[i];
-            if slope.abs() > 0.004 && h < BRIDGE_HEIGHT {
+            if h > BRIDGE_HEIGHT { continue; }
+            let look = 4.min(n / 2);
+            let h_behind = self.height[(i + n - look) % n];
+            let h_ahead = self.height[(i + look) % n];
+            let slope = h_ahead - h_behind;
+            if slope.abs() > 0.05 {
                 let c = self.center[i];
                 let tang = self.tangent_at(i);
                 let norm = self.normal_at(i);
                 let dir = if slope > 0.0 { 1.0 } else { -1.0 };
-                let tip = c + tang * 6.0 * dir;
-                let l = c - tang * 4.0 * dir + norm * 5.0;
-                let r = c - tang * 4.0 * dir - norm * 5.0;
-                let alpha = (slope.abs() * 60.0).clamp(0.08, 0.3);
-                draw_triangle(tip, l, r, Color::new(1.0, 1.0, 1.0, alpha));
+                let strength = (slope.abs() * 4.0).clamp(0.0, 1.0);
+                // Chevron-pil
+                let tip = c + tang * 8.0 * dir;
+                let l = c - tang * 5.0 * dir + norm * 7.0;
+                let r = c - tang * 5.0 * dir - norm * 7.0;
+                let alpha = strength * 0.25;
+                let color = if slope > 0.0 {
+                    Color::new(1.0, 1.0, 1.0, alpha) // Oppover = lys
+                } else {
+                    Color::new(0.0, 0.0, 0.0, alpha) // Nedover = mork
+                };
+                draw_triangle(tip, l, r, color);
+                // Gradient-stripe paa tvers av banen for ekstra synlighet
+                if strength > 0.3 {
+                    let stripe_alpha = strength * 0.08;
+                    let stripe_col = if slope > 0.0 {
+                        Color::new(1.0, 1.0, 0.8, stripe_alpha)
+                    } else {
+                        Color::new(0.0, 0.0, 0.0, stripe_alpha)
+                    };
+                    let p1 = c + norm * half * 0.9;
+                    let p2 = c - norm * half * 0.9;
+                    draw_line(p1.x, p1.y, p2.x, p2.y, 2.0, stripe_col);
+                }
             }
         }
 
@@ -515,26 +662,26 @@ pub fn compute_start(center: &[Vec2], start_idx: usize) -> (Vec<Vec2>, f32) {
 pub fn make_oval() -> Track {
     let cx = 1200.0_f32;
     let cy = 900.0_f32;
-    let rx = 900.0_f32;
-    let ry = 600.0_f32;
-    let segments = 400;
+    let rx = 1100.0_f32;
+    let ry = 700.0_f32;
+    let segments = 500;
     let center: Vec<Vec2> = (0..segments)
         .map(|i| {
             let a = (i as f32 / segments as f32) * TAU;
             vec2(cx + rx * a.cos(), cy + ry * a.sin())
         })
         .collect();
-    let width = 140.0;
+    let width = 150.0;
 
-    // Hoydeprofil: bakke paa nedre rett + humpe paa ovre rett
+    // Hoydeprofil: rolig — lang bakke + ett hopp
     let height: Vec<f32> = (0..segments)
         .map(|i| {
             let t = i as f32 / segments as f32;
-            // Stor bakke paa nedre rett (rundt t=0.25)
-            let hill = 1.6 * cosine_bump(circular_dist(t, 0.25), 0.12);
-            // Liten humpe (hopp-rampe) paa ovre rett (rundt t=0.75)
-            let bump = 0.8 * cosine_bump(circular_dist(t, 0.75), 0.04);
-            hill + bump
+            // Bred, myk bakke paa nedre langside
+            let hill = 1.2 * cosine_bump(circular_dist(t, 0.25), 0.15);
+            // Ett hopp paa ovre langside
+            let jump = 1.4 * cosine_bump(circular_dist(t, 0.75), 0.03);
+            hill + jump
         })
         .collect();
 
@@ -547,8 +694,8 @@ pub fn make_oval() -> Track {
 pub fn make_figure8() -> Track {
     let cx = 1200.0_f32;
     let cy = 900.0_f32;
-    let scale = 750.0_f32;
-    let segments = 500;
+    let scale = 900.0_f32;
+    let segments = 600;
     let center: Vec<Vec2> = (0..segments)
         .map(|i| {
             let t = (i as f32 / segments as f32) * TAU;
@@ -558,25 +705,18 @@ pub fn make_figure8() -> Track {
             vec2(cx + x, cy + y * 0.85)
         })
         .collect();
-    let width = 130.0;
+    let width = 140.0;
 
-    // Hoydeprofil: BRO ved foerste krysning (t=0.25, idx 125)
-    // Andre krysningen (t=0.75, idx 375) er paa bakken under broen
+    // Hoydeprofil: rampe ved krysningen, ellers ganske flatt
     let height: Vec<f32> = (0..segments)
         .map(|i| {
             let t = i as f32 / segments as f32;
-            let d = circular_dist(t, 0.25);
-            // Bro med flat topp (ingen hopp paa broen)
-            let bridge = if d < 0.03 {
-                3.0 // flat bro-dekke
-            } else if d < 0.10 {
-                3.0 * cosine_bump(d - 0.03, 0.07)
-            } else {
-                0.0
-            };
-            // Bølgende terreng i loopene
-            let hills = ((t * TAU * 3.0).sin() * 0.35).max(0.0);
-            bridge + hills
+            // Hoppe-rampe ved krysningen — fly over veien under
+            let ramp = 4.0 * cosine_bump(circular_dist(t, 0.25), 0.06);
+            // Myk bakke i hver loop
+            let hill1 = 0.8 * cosine_bump(circular_dist(t, 0.12), 0.08);
+            let hill2 = 0.8 * cosine_bump(circular_dist(t, 0.62), 0.08);
+            ramp + hill1 + hill2
         })
         .collect();
 
@@ -588,38 +728,84 @@ pub fn make_figure8() -> Track {
 pub fn make_fjord() -> Track {
     let cx = 1200.0_f32;
     let cy = 900.0_f32;
-    let segments = 500;
+    let segments = 600;
     let center: Vec<Vec2> = (0..segments)
         .map(|i| {
             let a = (i as f32 / segments as f32) * TAU;
-            let r = 700.0
-                + 180.0 * (2.0 * a).sin()
-                + 90.0 * (3.0 * a).cos()
-                + 55.0 * (5.0 * a).sin();
+            let r = 850.0
+                + 220.0 * (2.0 * a).sin()
+                + 110.0 * (3.0 * a).cos()
+                + 70.0 * (5.0 * a).sin();
             vec2(cx + r * a.cos(), cy + r * 0.7 * a.sin())
         })
         .collect();
-    let width = 135.0;
+    let width = 145.0;
 
-    // Hoydeprofil: dramatisk fjell-terreng med hopp
+    // Hoydeprofil: dramatisk fjell-terreng med flere hopp
     let height: Vec<f32> = (0..segments)
         .map(|i| {
             let a = (i as f32 / segments as f32) * TAU;
             let t = i as f32 / segments as f32;
-            // Fjell-landskap
-            let terrain = 1.2 * (a).sin()
-                + 0.8 * (2.0 * a).cos()
-                + 0.6 * (3.0 * a).sin()
-                + 0.4 * (5.0 * a).cos();
-            // Hoppe-rampe (bratt bakketopp)
-            let ramp = 2.8 * cosine_bump(circular_dist(t, 0.6), 0.035);
+            let terrain = 1.4 * (a).sin()
+                + 0.9 * (2.0 * a).cos()
+                + 0.7 * (3.0 * a).sin()
+                + 0.5 * (5.0 * a).cos();
+            // Tre hoppe-ramper
+            let ramp1 = 2.5 * cosine_bump(circular_dist(t, 0.2), 0.03);
+            let ramp2 = 2.0 * cosine_bump(circular_dist(t, 0.55), 0.03);
+            let ramp3 = 3.0 * cosine_bump(circular_dist(t, 0.8), 0.025);
             // Ekstra bakke
-            let hill2 = 1.5 * cosine_bump(circular_dist(t, 0.3), 0.06);
-            (terrain + ramp + hill2).max(0.0)
+            let hill = 1.8 * cosine_bump(circular_dist(t, 0.4), 0.06);
+            (terrain + ramp1 + ramp2 + ramp3 + hill).max(0.0)
         })
         .collect();
 
     let (start_positions, start_angle) = compute_start(&center, 0);
     let trees = generate_trees(&center, width, &height);
     Track { name: "Fjord Circuit", center, width, height, start_positions, start_angle, trees }
+}
+
+pub fn make_chaos() -> Track {
+    let cx = 1400.0_f32;
+    let cy = 1000.0_f32;
+    let segments = 800;
+    // Uregelmessig form med skarpe svinger og lange rette strekk
+    let center: Vec<Vec2> = (0..segments)
+        .map(|i| {
+            let a = (i as f32 / segments as f32) * TAU;
+            let r = 1000.0
+                + 350.0 * (a).sin()
+                + 200.0 * (2.0 * a).cos()
+                + 150.0 * (3.0 * a).sin()
+                + 100.0 * (4.0 * a).cos()
+                + 80.0 * (7.0 * a).sin();
+            vec2(cx + r * a.cos(), cy + r * 0.75 * a.sin())
+        })
+        .collect();
+    let width = 155.0;
+
+    // Hoydeprofil: konstant kaos — humper overalt + store hopp
+    let height: Vec<f32> = (0..segments)
+        .map(|i| {
+            let t = i as f32 / segments as f32;
+            let a = t * TAU;
+            // Grunnterreng: bølger
+            let terrain = 0.8 * (a * 3.0).sin()
+                + 0.5 * (a * 7.0).cos()
+                + 0.3 * (a * 11.0).sin();
+            // 5 hoppe-ramper spredt rundt
+            let j1 = 3.0 * cosine_bump(circular_dist(t, 0.1), 0.02);
+            let j2 = 2.5 * cosine_bump(circular_dist(t, 0.3), 0.025);
+            let j3 = 3.5 * cosine_bump(circular_dist(t, 0.5), 0.02);
+            let j4 = 2.0 * cosine_bump(circular_dist(t, 0.7), 0.03);
+            let j5 = 4.0 * cosine_bump(circular_dist(t, 0.9), 0.02);
+            // Washboard-humper (tette smaa humper)
+            let washboard = ((t * TAU * 20.0).sin() * 0.25).max(0.0);
+            (terrain + j1 + j2 + j3 + j4 + j5 + washboard).max(0.0)
+        })
+        .collect();
+
+    let (start_positions, start_angle) = compute_start(&center, 0);
+    let trees = generate_trees(&center, width, &height);
+    Track { name: "Kaos Canyon", center, width, height, start_positions, start_angle, trees }
 }

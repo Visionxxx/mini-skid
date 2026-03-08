@@ -79,6 +79,7 @@ pub struct Car {
     pub air_height: f32,
     pub vert_vel: f32,
     pub just_landed: bool,
+    pub track_idx: usize, // Siste kjente segment-indeks (for kryss-hint)
 }
 
 impl Car {
@@ -95,6 +96,7 @@ impl Car {
             is_drifting: false, finished: false, finish_time: 0.0,
             best_lap: f32::MAX, lap_start_time: 0.0,
             ground_height: track.height_at_pos(pos), air_height: 0.0, vert_vel: 0.0, just_landed: false,
+            track_idx: track.nearest_info(pos).0,
         }
     }
 
@@ -111,6 +113,7 @@ impl Car {
             is_drifting: false, finished: false, finish_time: 0.0,
             best_lap: f32::MAX, lap_start_time: 0.0,
             ground_height: track.height_at_pos(pos), air_height: 0.0, vert_vel: 0.0, just_landed: false,
+            track_idx: track.nearest_info(pos).0,
         }
     }
 
@@ -310,24 +313,26 @@ impl Car {
         self.vel = fwd * forward_speed + side * side_speed * grip;
 
         // Terreng: helningseffekter (kun paa bakken)
+        // Bruk hint for aa unngaa segment-hopping ved kryss
+        let (nearest_idx, _, _) = track.nearest_info_hint(self.pos, Some(self.track_idx));
+        self.track_idx = nearest_idx;
+
         if !airborne {
-            let (nearest_idx, _, _) = track.nearest_info(self.pos);
             let n = track.center.len();
-            // Raa hoyde-differanse over bredere oppslag — gir verdier i 0.1-0.8 range
             let h_behind = track.height[(nearest_idx + n - SLOPE_LOOK) % n];
             let h_ahead = track.height[(nearest_idx + SLOPE_LOOK) % n];
-            let slope = h_ahead - h_behind;  // positiv = oppover i banens retning
+            let slope = h_ahead - h_behind;
             let track_fwd = track.tangent_at(nearest_idx);
             let going_forward = self.vel.dot(track_fwd) > 0.0;
             let effective_slope = if going_forward { slope } else { -slope };
             let speed = self.vel.length();
             if effective_slope > 0.01 && speed > 10.0 {
-                // Oppoverbakke: additiv bremsekraft
+                // Oppoverbakke: maks 10% fartstap per frame
                 let decel = effective_slope * SLOPE_FORCE * dt;
-                self.vel -= self.vel.normalize() * decel.min(speed * 0.3);
+                self.vel -= self.vel.normalize() * decel.min(speed * 0.1);
             } else if effective_slope < -0.01 && speed > 10.0 {
-                // Nedoverbakke: additiv boost
-                let accel = effective_slope.abs() * SLOPE_FORCE * dt;
+                // Nedoverbakke: boost (capped saa man ikke overgaar MAX_SPEED for mye)
+                let accel = effective_slope.abs() * SLOPE_FORCE * 0.7 * dt;
                 self.vel += self.vel.normalize() * accel;
             }
         }
@@ -339,13 +344,19 @@ impl Car {
         self.pos += self.vel * dt;
         self.vel *= (-0.12 * dt).exp();
 
+        // Oppdater track_idx etter posisjonsflytt
+        let (new_idx, _, new_t) = track.nearest_info_hint(self.pos, Some(self.track_idx));
+        self.track_idx = new_idx;
+
         // Terreng: oppdater bakkehoyde og sjekk for hopp
-        let new_ground = track.height_at_pos(self.pos);
+        let n = track.center.len();
+        let h1 = track.height[new_idx];
+        let h2 = track.height[(new_idx + 1) % n];
+        let new_ground = h1 + (h2 - h1) * new_t;
+
         if airborne {
-            // I lufta: tyngdekraft
             self.vert_vel -= GRAVITY * dt;
             self.air_height += self.vert_vel * dt;
-            // Landing
             if self.air_height <= 0.0 {
                 self.air_height = 0.0;
                 self.just_landed = true;
@@ -365,18 +376,15 @@ impl Car {
                 }
             }
         } else {
-            // Paa bakken: sjekk for crest (bakketopp) for aa starte hopp
-            let (nearest_idx, _, _) = track.nearest_info(self.pos);
-            let n = track.center.len();
             let look_j = SLOPE_LOOK;
-            let behind = track.height[(nearest_idx + n - look_j) % n];
-            let ahead = track.height[(nearest_idx + look_j) % n];
-            let here = track.height[nearest_idx];
+            let behind = track.height[(new_idx + n - look_j) % n];
+            let ahead = track.height[(new_idx + look_j) % n];
+            let here = track.height[new_idx];
             let crest_strength = here - (behind + ahead) / 2.0;
             let speed = self.vel.length();
             if crest_strength > JUMP_CREST_THRESHOLD && speed > JUMP_MIN_SPEED {
                 self.vert_vel = (crest_strength * JUMP_SCALE * speed).min(MAX_JUMP_VEL);
-                self.air_height = 0.01;
+                self.air_height = 0.1; // Over is_airborne-terskelen saa luft-fysikken starter
             }
             self.ground_height = new_ground;
         }
@@ -437,7 +445,7 @@ impl Car {
         }
 
         // Myk vegg: gradvis brems og skyv mot banen
-        let (nearest_idx, dist, _) = track.nearest_info(self.pos);
+        let (nearest_idx, dist, _) = track.nearest_info_hint(self.pos, Some(self.track_idx));
         let half_w = track.width / 2.0;
         let max_offtrack = track.width * 1.5;
         if dist > half_w {
@@ -487,9 +495,10 @@ impl Car {
         let hw = 14.0;
         let hh = 7.0;
 
-        // Visuell loft ved hopp (bilen tegnes forskjøvet oppover)
-        let lift = vec2(0.0, -self.air_height * JUMP_LIFT_PX);
-        let scale = 1.0 + self.air_height * 0.06;
+        // Visuell loft: air_height lofter bilen oppover paa skjermen
+        let ah = self.air_height;
+        let lift = vec2(0.0, -ah * JUMP_LIFT_PX);
+        let scale = 1.0 + ah * 0.12;
 
         let corners = [
             self.pos + (fwd * hw + side * hh) * scale + lift,
@@ -498,15 +507,15 @@ impl Car {
             self.pos + (-fwd * hw + side * hh) * scale + lift,
         ];
 
-        // Skygge (forskyves mer jo hoyere bilen er)
-        let shadow_spread = 1.0 + self.air_height * 0.2;
-        let so = vec2(2.0 + self.air_height * 5.0, 3.0 + self.air_height * 6.0);
-        let shadow_alpha = (0.25 - self.air_height * 0.06).max(0.04);
+        // Skygge: skarp og mork, rett under bilen paa bakken (som Super Skidmarks)
+        // Liten offset nedover-hoyre for lys-illusjon
+        let so = vec2(2.0, 3.0 + ah * 3.0);
+        let shadow_alpha = if ah > 0.1 { 0.45 } else { 0.2 };
         let sc = [
-            self.pos + (fwd * hw + side * hh) * shadow_spread + so,
-            self.pos + (fwd * hw - side * hh) * shadow_spread + so,
-            self.pos + (-fwd * hw - side * hh) * shadow_spread + so,
-            self.pos + (-fwd * hw + side * hh) * shadow_spread + so,
+            self.pos + (fwd * hw + side * hh) + so,
+            self.pos + (fwd * hw - side * hh) + so,
+            self.pos + (-fwd * hw - side * hh) + so,
+            self.pos + (-fwd * hw + side * hh) + so,
         ];
         draw_triangle(sc[0], sc[1], sc[2], Color::new(0.0, 0.0, 0.0, shadow_alpha));
         draw_triangle(sc[0], sc[2], sc[3], Color::new(0.0, 0.0, 0.0, shadow_alpha));

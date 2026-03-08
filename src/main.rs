@@ -93,7 +93,7 @@ fn calc_positions(cars: &[Car], track: &Track) -> Vec<usize> {
 
 #[macroquad::main(window_conf)]
 async fn main() {
-    let tracks = vec![make_oval(), make_figure8(), make_fjord()];
+    let tracks = vec![make_oval(), make_figure8(), make_fjord(), make_chaos()];
     let mut selected: usize = 0;
     let mut num_players: usize = 2;
     let mut state = GameState::Menu;
@@ -131,6 +131,7 @@ async fn main() {
                 if is_key_pressed(KeyCode::Key1) { selected = 0; start = true; }
                 if is_key_pressed(KeyCode::Key2) { selected = 1; start = true; }
                 if is_key_pressed(KeyCode::Key3) { selected = 2; start = true; }
+                if is_key_pressed(KeyCode::Key4) { selected = 3; start = true; }
                 if is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::Space) { start = true; }
 
                 // Tegn meny og haandter touch

@@ -1,2 +1,4 @@
 /target
 web/mini_skid.wasm
+/mini_skid/
+cargo.toml

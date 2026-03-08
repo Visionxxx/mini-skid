@@ -21,14 +21,20 @@
 
 ## Screenshots
 
-*Oval Speedway / Figur-8 Cross / Fjord Circuit*
+*Oval Speedway / Figur-8 Cross / Fjord Circuit / Kaos Canyon*
 
 ## Features
 
-- **6 biler** — 2 spillere (WASD + piltaster) + 4 AI med personlighet
-- **3 baner** — Oval Speedway, Figur-8 med bro, Fjord Circuit med hopp
-- **Terreng** — bakker, hopp-ramper, bro/overgang, helningseffekter
+- **6 biler** — 1–2 spillere (WASD + piltaster) + AI-motstandere
+- **4 baner** med stigende vanskelighetsgrad:
+  - **Oval Speedway** — glatt racing med ett hopp
+  - **Figur-8 Cross** — rampehopp over krysningen
+  - **Fjord Circuit** — kupert terreng med tre hopp-ramper
+  - **Kaos Canyon** — ekstrem bane med fem hopp og washboard-humper
+- **Terreng** — bakker, hopp-ramper, helningseffekter, retningslys-shading
+- **Hopp** — bilene letter fra bakken ved bakketopper, med skygge og visuell lift
 - **Drift-fysikk** — skidmerker, røykskyer, gnister
+- **Touch-kontroller** — fullstendig spillbart på iPad/mobil (1-spiller modus)
 - **Screen shake** — ved kollisjoner og landinger
 - **Detaljer** — frontlykter, baklys, eksosflammer, tilskuere, flagg
 - **WASM** — spilles direkte i nettleseren, under 700 KB totalt
@@ -42,11 +48,21 @@
 | `A` | `Left` | Sving venstre |
 | `D` | `Right` | Sving hoyre |
 
+| Touch | Funksjon |
+|-------|----------|
+| `<` | Sving venstre |
+| `>` | Sving hoyre |
+| `BRK` | Brems |
+| `GAS` | Gass |
+
 | Tast | Funksjon |
 |------|----------|
+| `Enter` | Start |
+| `Tab` | Bytt 1/2 spillere |
 | `P` | Pause |
 | `R` | Restart race |
 | `ESC` | Tilbake til meny |
+| `1-4` | Hurtigvalg bane |
 
 ## Build
 

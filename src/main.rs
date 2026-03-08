@@ -119,31 +119,12 @@ async fn main() {
                 if is_key_pressed(KeyCode::Down) || is_key_pressed(KeyCode::S) {
                     if selected < tracks.len() - 1 { selected += 1; }
                 }
-                // Bytt antall spillere
+                // Bytt antall spillere (tastatur)
                 if is_key_pressed(KeyCode::Tab)
                     || is_key_pressed(KeyCode::Left) || is_key_pressed(KeyCode::Right)
                     || is_key_pressed(KeyCode::A) || is_key_pressed(KeyCode::D)
                 {
                     num_players = if num_players == 1 { 2 } else { 1 };
-                }
-                // Touch: trykk paa banevalg-omraadet for aa starte
-                if is_mouse_button_pressed(MouseButton::Left) {
-                    let (mx, my) = mouse_position();
-                    // Spillertoggle-omraadet
-                    let py = 260.0 + tracks.len() as f32 * 90.0 + 15.0;
-                    if my >= py && my <= py + 25.0 {
-                        num_players = if num_players == 1 { 2 } else { 1 };
-                    }
-                    // Trykk paa en bane for aa velge og starte
-                    for (i, _) in tracks.iter().enumerate() {
-                        let ty = 260.0 + i as f32 * 90.0 - 30.0;
-                        if my >= ty && my <= ty + 70.0
-                            && mx >= screen_width() / 2.0 - 220.0
-                            && mx <= screen_width() / 2.0 + 220.0
-                        {
-                            selected = i;
-                        }
-                    }
                 }
 
                 let mut start = false;
@@ -152,6 +133,16 @@ async fn main() {
                 if is_key_pressed(KeyCode::Key3) { selected = 2; start = true; }
                 if is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::Space) { start = true; }
 
+                // Tegn meny og haandter touch
+                set_default_camera();
+                let action = draw_menu(&tracks, selected, num_players);
+                match action {
+                    MenuAction::Start => { start = true; }
+                    MenuAction::TogglePlayers => { num_players = if num_players == 1 { 2 } else { 1 }; }
+                    MenuAction::SelectTrack(i) => { selected = i; }
+                    MenuAction::None => {}
+                }
+
                 if start {
                     let track = &tracks[selected];
                     cars = create_cars(track, num_players);
@@ -159,14 +150,10 @@ async fn main() {
                     particles.clear();
                     race_time = 0.0;
                     positions = calc_positions(&cars, track);
-                    // Sett kamera til start
                     let mid = (cars[0].pos + cars[1].pos) / 2.0;
                     camera = GameCamera::new(mid);
                     state = GameState::Countdown(COUNTDOWN_TIME);
                 }
-
-                set_default_camera();
-                draw_menu(&tracks, selected, num_players);
             }
 
             GameState::Countdown(ref mut time_left) => {
@@ -307,7 +294,10 @@ async fn main() {
                 draw_hud(&cars, &positions, race_time, track.name);
                 track.draw_minimap(&cars);
                 draw_touch_controls();
-                draw_text("WASD / Piltaster  |  P = Pause  |  R = Reset  |  ESC = Meny", screen_width() / 2.0 - 240.0, screen_height() - 10.0, 16.0, Color::new(1.0, 1.0, 1.0, 0.4));
+                if draw_pause_button() == InGameAction::Pause {
+                    state = GameState::Paused;
+                }
+                draw_text("WASD / Piltaster  |  P = Pause  |  R = Reset  |  ESC = Meny", screen_width() / 2.0 - 240.0, screen_height() - 10.0, 16.0, Color::new(1.0, 1.0, 1.0, 0.25));
             }
 
             GameState::Paused => {
@@ -342,10 +332,13 @@ async fn main() {
                 draw_hud(&cars, &positions, race_time, track.name);
                 track.draw_minimap(&cars);
 
-                // Pause-overlegg
-                draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color::new(0.0, 0.0, 0.0, 0.5));
-                draw_text("PAUSE", screen_width() / 2.0 - 70.0, screen_height() / 2.0 - 10.0, 60.0, WHITE);
-                draw_text("P / Space = Fortsett  |  ESC = Meny", screen_width() / 2.0 - 155.0, screen_height() / 2.0 + 25.0, 20.0, LIGHTGRAY);
+                // Pause-overlegg med touch-knapper
+                let pause_action = draw_pause_overlay();
+                if pause_action == PauseAction::Resume {
+                    state = GameState::Racing;
+                } else if pause_action == PauseAction::Menu {
+                    state = GameState::Menu;
+                }
             }
 
             GameState::Finished => {
@@ -390,7 +383,18 @@ async fn main() {
 
                 flush_world_to_screen(&world_rt);
                 draw_hud(&cars, &positions, race_time, track.name);
-                draw_finish_screen(&cars, &positions, race_time);
+                let finish_action = draw_finish_screen(&cars, &positions, race_time);
+                if finish_action == FinishAction::Retry {
+                    cars = create_cars(track, num_players);
+                    skids.clear();
+                    particles.clear();
+                    race_time = 0.0;
+                    let mid = (cars[0].pos + cars[1].pos) / 2.0;
+                    camera = GameCamera::new(mid);
+                    state = GameState::Countdown(COUNTDOWN_TIME);
+                } else if finish_action == FinishAction::Menu {
+                    state = GameState::Menu;
+                }
             }
         }
 

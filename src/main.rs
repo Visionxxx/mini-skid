@@ -15,7 +15,7 @@ use track::*;
 
 fn window_conf() -> Conf {
     Conf {
-        window_title: "Mini Skid - Super Skidmarks!".to_string(),
+        window_title: "Mini Skid".to_string(),
         window_width: SCREEN_W as i32,
         window_height: SCREEN_H as i32,
         ..Default::default()
